@@ -1,0 +1,34 @@
+
+artigo
+Previsão de morte súbita cardíaca e morte por falha da bomba na insuficiência cardíaca crônica pela combinação de ECG e marcadores clínicos em um modelo de risco integrado.
+
+https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0186152
+
+https://arxiv.org/html/2406.17002v2
+
+https://www.scielo.br/j/abc/a/H9qjQFsc6gvBpYMTZJPQJFF/?format=pdf&lang=pt
+
+https://www.scielo.br/j/abc/a/SbtNW87KvqqdF94RyFB9VHq/?format=pdf&lang=pt
+
+http://sociedades.cardiol.br/nn/revista/pdf/revista_v3n4/04-comentado-preditores.pdf
+
+https://www.scielo.br/j/abc/a/578gbW3NGHR9jrbbvvsGBPj/?format=pdf&lang=pt
+
+http://sociedades.cardiol.br/socerj/revista/2004_04/a2004_v17_n04_art03.pdf
+
+
+List de biliotecas
+NeuroKit2
+NeuroKit
+BioSPPy
+Physiology
+HeartPy
+livasv
+symkit
+phy
+phy2bids
+biosppy (parece repetido com BioSPPy)
+ecgpath
+wfdb-python
+BioPsyKit
+

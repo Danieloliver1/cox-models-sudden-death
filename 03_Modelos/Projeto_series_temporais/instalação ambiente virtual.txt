@@ -1,0 +1,44 @@
+py -3.10  --version   versão 3.10
+py -3.10 -m venv amb_st
+amb_st\Scripts\activate
+
+pelo anaconda 
+conda create -n series_temporais python=3.10
+conda activate NomeDoAmbiente
+
+conda info --envs
+
+salvar o conda na pasta
+conda create --prefix ./meu_ambiente python=3.10
+conda activate ./meu_ambiente
+conda remove --prefix ./meu_ambiente --all # deletar o ambiente
+
+
+powershell
+source activate series_temporais
+
+python.exe -m pip install --upgrade pip
+
+
+link do site 
+https://anaconda.org/msys2/m2w64-toolchain
+https://anaconda.org/anaconda/libpython
+
+
+
+
+
+Salvando as versões
+pip freeze > requirements.txt
+
+Para atualizar precisa só salvar de novo 
+
+Como instalar dependências de um requirements.txt:
+Se você ou outra pessoa precisar recriar o ambiente, use:
+
+pip install -r requirements.txt
+
+
+erificar se as dependências estão instaladas corretamente: Após a instalação, você pode verificar se as dependências foram instaladas corretamente com:
+
+pip freeze

@@ -1,0 +1,6 @@
+# Ignore all files in the root directory
+
+01_Dataset/dados_ECG
+01_Dataset/Duckedb
+
+04_Painel_e_logs/venv

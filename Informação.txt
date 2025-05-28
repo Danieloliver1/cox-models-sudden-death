@@ -1,0 +1,6 @@
+# Instalações 
+
+!pip install wfdb
+!pip install neurokit2
+
+
