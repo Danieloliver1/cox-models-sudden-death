@@ -10,10 +10,10 @@ Investigar e adaptar modelos de análise de sobrevivência, especialmente a ** R
 
 # 🔍 Contexto
 Tem quatro pastas principais:
-    - 01_Dataset: que não esta disponivel no repositório, pelo o grande volume de dados mas é necessário para rodar os scripts. 
-    - 02_Prepocessamento_filtro: Onde vou tratar de limpar os sinais ECG, e aplicar filtros para remover ruídos. passar por uma etapa de validação e depois padronização dos dados.
-    - 03_Modelos: Onde vou aplicar os modelos de regressão de Cox, e outros modelos de aprendizado de máquina para prever a morte súbita cardíaca.
-    - 04_Painel_e_logs: Onde vou gerar os logs dos modelos, e os painéis de visualização dos resultados. Esta pasta é mais para o uso pessoal e não é necessário para rodar os scripts. a ideia é guardar o log dos modelos e os resultados dos experimentos.
+- 01_Dataset: que não esta disponivel no repositório, pelo o grande volume de dados mas é necessário para rodar os scripts. 
+- 02_Prepocessamento_filtro: Onde vou tratar de limpar os sinais ECG, e aplicar filtros para remover ruídos. passar por uma etapa de validação e depois padronização dos dados.
+- 03_Modelos: Onde vou aplicar os modelos de regressão de Cox, e outros modelos de aprendizado de máquina para prever a morte súbita cardíaca.
+- 04_Painel_e_logs: Onde vou gerar os logs dos modelos, e os painéis de visualização dos resultados. Esta pasta é mais para o uso pessoal e não é necessário para rodar os scripts. a ideia é guardar o log dos modelos e os resultados dos experimentos.
 
 ## 📦 Dados
 
