@@ -3,4 +3,12 @@
 01_Dataset/dados_ECG
 01_Dataset/Duckedb
 
-04_Painel_e_logs/venv
+04_Painel
+
+Arquitetura/__pycache__
+Arquitetura/logs
+
+*.pt
+*.hpt
+*.png
+

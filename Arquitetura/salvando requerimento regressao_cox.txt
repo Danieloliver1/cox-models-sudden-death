@@ -1,0 +1,58 @@
+
+ter o python instalado
+
+criar um ambiente virtual 
+    python -m venv venv
+    .\venv\Scripts\activate    # ativar o ambiente virtual
+    deactivate                 # desativar o ambiente virtual
+
+    
+
+bibliotecas para instalar 
+pip install pandas
+pip instal prophet
+pip install plotly
+pip install streamlit
+
+
+
+pip install streamlit-extras # IMPORTANTE
+
+
+O Streamlit é uma biblioteca em Python que permite a criação e compartilhamento de aplicativos web, com a vantagem de ser fácil de utilizar, sem a necessidade de conhecer ferramentas de front-end ou de deploy de aplicações.
+
+Neste curso, vamos utilizar o Streamlit para construir um dashboard de vendas, mas esse não é o único tipo de projeto que podemos criar com essa ferramenta. Na seção "Galeria" do site oficial do Streamlit, é possível visualizar diversos exemplos de aplicações que podem ser construídas com o Streamlit.
+
+
+Documentação do streamlit
+https://docs.streamlit.io/develop/api-reference
+
+Execultar o Streamlit
+streamlit run app.py
+ou
+
+python -m streamlit run app.py
+
+
+Salvando as versões
+pip freeze > requirements.txt
+
+Para atualizar precisa só salvar de novo 
+
+Como instalar dependências de um requirements.txt:
+Se você ou outra pessoa precisar recriar o ambiente, use:
+
+pip install -r requirements.txt
+
+
+verificar se as dependências estão instaladas corretamente: Após a instalação, você pode verificar se as dependências foram instaladas corretamente com:
+
+pip freeze
+
+
+Após a instalação, você pode confirmar se a dependência foi instalada corretamente executando:
+
+pip show numpy ->exemplos
+
+para executar o  MLFlow 
+mlflow ui --port 5000
