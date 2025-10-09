@@ -38,9 +38,9 @@ import neurokit2 as nk
 import pywt  # Biblioteca para transformada wavelet
 
 
-linkdb = "D:/cox-models-sudden-death/01_Dataset/Duckedb/Holter_ECG/1min/banco_ecg_limpo.duckdb"
-tabela = 'ecg_pacientes_limpo'
-usar_limpeza = False
+linkdb = "D:/cox-models-sudden-death/01_Dataset/Duckedb/Holter_ECG/1min/banco_ecg.duckdb"
+tabela = 'ecg_pacientes'
+
 
 # ==========================================limpeza do ECG==============================================
 class ECGProcessor:
@@ -58,8 +58,21 @@ class ECGProcessor:
         ecg_wavelet_filtered = pywt.waverec(coeffs, wavelet)
         return ecg_wavelet_filtered
     
+    # def wavelet_filter_preservando_qrs(self, signal, wavelet='db6', level=4, atenuacao=0.2):
+    #     coeffs = pywt.wavedec(signal, wavelet, level=level)
 
-    def process(self, signal, sampling_rate=200, metodo='neurokit'):
+    #     # Atenua apenas o coeficiente de aproximação (baixa frequência)
+    #     # O coeficiente cA está sempre no primeiro índice (coeffs[0])
+    #     coeffs[0] *= atenuacao 
+
+    #     # Opcional: você também pode atenuar os detalhes de frequência mais baixa,
+    #     # como cD4, cD3 (índices 1 e 2 se level=4), se desejar.
+    #     # Exemplo: for i in range(1, 3): coeffs[i] *= (atenuacao + 0.2)
+
+    #     ecg_wavelet_filtered = pywt.waverec(coeffs, wavelet)
+    #     return ecg_wavelet_filtered
+
+    def process(self, signal, sampling_rate=200, metodo='elgendi2010'):
         """
         Função principal de processamento.
         Limpa o sinal, calcula as métricas HRV, QRS e QTc, e retorna um DataFrame com os resultados.
@@ -98,202 +111,197 @@ class ECGDatasetBatch(Dataset):
     
     
 # =================================================preprocessamento dos dados==================================
-
 class PassandoDadosAmostra:
-    """_summary_
-
-        Args:
-            limite_features (int, optional): _description_. Defaults to 12000.
-            limite_labels (int, optional): _description_. Defaults to None.
-            metodo (str, optional): _description_. Defaults to 'elgendi2010'.
-        """
-    def __init__(self, limite_features=12000, limite_labels=None, metodo='elgendi2010'):
+    """
+    Classe para carregar e processar dados de ECG para análise de sobrevivência.
+    
+    Args:
+        usar_limpeza: Se True, aplica filtros de limpeza no ECG
+        limite_features: Número máximo de amostras por paciente (None = todas)
+        limite_labels: Número máximo de pacientes (None = todos)
+        metodo: Método de limpeza NeuroKit ('elgendi2010', 'pantompkins', etc.)
+        batch_size: Tamanho do batch para DataLoader
+        wavelet_level: Nível de decomposição wavelet
+    """
+    
+    def __init__(self, usar_limpeza=False, limite_features=None, limite_labels=None, 
+                 metodo='elgendi2010', batch_size=128):
         
-        # Por padrão vou definir sinais de 1 minutos (12000 amostras a 200 Hz) 
-        self.limite_features  = limite_features  #  quantidade de dados
-        self.limite_labels  = limite_labels # quantidade de pacientes
+        self.limite_features = limite_features
+        self.limite_labels = limite_labels
         self.metodo = metodo
-        self.batch_size = 128
+        self.batch_size = batch_size
+        self.usar_limpeza = usar_limpeza
+        
+        
+        # Atributos inicializados após processamento
         self.labtrans = None
-        
         self.amostra_sinal = None
-        
-        self.evento_testeget = None
-        self.tempo_testeget = None
-        self.sinal_testeget = None
-        
+        self.tempo_teste = None
+        self.evento_teste = None
     
     def carregamento(self):
+        """
+        Carrega dados do DuckDB e processa sinais ECG.
         
-        # TESTE PARA FLUXO DO PROCESSAMENTO DO ECG COM 1 MINUTO (12000 AMOSTRAS A 200 Hz)
-
-
-        # Conexões separadas
+        Returns:
+            Tupla (atributo_x, atributo_y, atributo_z, tempos, eventos)
+        """
         conn_leitura = duckdb.connect(linkdb, read_only=True)
-        #conn_escrita = duckdb.connect("D:/Projeto_Tese_mestrado/02_Dataset/Duckedb/Holter_ECG/1h/atributos_ecg.duckdb")
-
-        # Listas para armazenar as amostras processadas
-        atributo_x = []
-        atributo_y = []
-        atributo_z = []
-        tempos = []
-        eventos = []
-    
-        # Obtendo a lista de pacientes
         
-        if self.limite_labels == None:
-            lista1 = conn_leitura.execute(f"""
-                SELECT DISTINCT id_paciente 
-                FROM {tabela} 
-                ORDER BY id_paciente;
-            """).fetchdf()
+        atributo_x, atributo_y, atributo_z = [], [], []
+        tempos, eventos = [], []
+        
+        # Obter lista de pacientes do banco ECG
+        if self.limite_labels is None:
+            query_pacientes = f"SELECT DISTINCT id_paciente FROM {tabela} ORDER BY id_paciente;"
         else:
-            
-            lista1 = conn_leitura.execute(f"""
-                SELECT DISTINCT id_paciente 
-                FROM {tabela} 
-                ORDER BY id_paciente
-                LIMIT {self.limite_labels};
-            """).fetchdf()
-            
-        lista2 = dados['id_paciente'].unique()
+            query_pacientes = f"SELECT DISTINCT id_paciente FROM {tabela} ORDER BY id_paciente LIMIT {self.limite_labels};"
         
+        lista_ecg = conn_leitura.execute(query_pacientes).fetchdf()
+        lista_labels = dados['id_paciente'].unique()
         
-        # Filtrando a lista de pacientes para incluir apenas aqueles que estão na lista de pacientes do ECG
-        lista = lista1[lista1['id_paciente'].isin(lista2)]
-
-        # Processamento dos dados dos pacientes
-        for paciente in tqdm(lista['id_paciente'], desc="Processando pacientes", unit="paciente"):
-            # Consulta para pegar os dados do ECG do paciente
-            
-            if self.limite_features == None:
-                sinais = conn_leitura.execute(f"""
-                    SELECT * FROM {tabela};
-                """).fetchdf()   # Pegando todos os sinais disponíveis
+        # Interseção: pacientes com ECG E labels
+        pacientes_validos = lista_ecg[lista_ecg['id_paciente'].isin(lista_labels)]
+        
+        if len(pacientes_validos) == 0:
+            raise ValueError("Nenhum paciente válido encontrado (sem interseção entre ECG e labels)")
+        
+        logger.info(f"Processando {len(pacientes_validos)} pacientes válidos")
+        
+        # Processamento dos pacientes
+        processor = ECGProcessor() if self.usar_limpeza else None
+        
+        for paciente in tqdm(pacientes_validos['id_paciente'], desc="Processando pacientes"):
+            # Query para pegar sinais do paciente
+            if self.limite_features is None:
+                query_sinais = f"SELECT * FROM {tabela} WHERE id_paciente = '{paciente}';"
             else:
-                sinais = conn_leitura.execute(f"""
-                    SELECT * FROM {tabela}
-                    WHERE id_paciente = '{paciente}'
-                    LIMIT {self.limite_features};
-                """).fetchdf()   # Pegando sinais de 1 minutos (12000 amostras a 200 Hz) 
-
-            # Extrair os sinais
+                query_sinais = f"SELECT * FROM {tabela} WHERE id_paciente = '{paciente}' LIMIT {self.limite_features};"
+            
+            sinais = conn_leitura.execute(query_sinais).fetchdf()
+            
+            if len(sinais) == 0:
+                logger.warning(f"Paciente {paciente} sem sinais no banco - pulando")
+                continue
+            
+            # Extrair sinais
             ecg_x = sinais['sinal_x'].values
             ecg_y = sinais['sinal_y'].values
             ecg_z = sinais['sinal_z'].values
             
-            if usar_limpeza == True:
-                # Criar o processador de ECG
-                atributos = ECGProcessor()
-
-                # Processar cada sinal
-                amostra_x = atributos.process(ecg_x, sampling_rate=200, metodo=self.metodo)
-                amostra_y = atributos.process(ecg_y, sampling_rate=200, metodo=self.metodo)
-                amostra_z = atributos.process(ecg_z, sampling_rate=200, metodo=self.metodo)
+            # Aplicar limpeza se solicitado
+            if self.usar_limpeza:
+                amostra_x = processor.process(ecg_x, sampling_rate=200, metodo=self.metodo)
+                amostra_y = processor.process(ecg_y, sampling_rate=200, metodo=self.metodo)
+                amostra_z = processor.process(ecg_z, sampling_rate=200, metodo=self.metodo)
             else:
-                amostra_x = ecg_x
-                amostra_y = ecg_y
-                amostra_z = ecg_z
-                
-
-            # Adicionar os sinais processados às listas
+                amostra_x, amostra_y, amostra_z = ecg_x, ecg_y, ecg_z
+            
+            # Adicionar às listas
             atributo_x.append(amostra_x)
             atributo_y.append(amostra_y)
             atributo_z.append(amostra_z)
-
-
-            # Pegar o tempo e o evento para o paciente
-            tempo = dados[dados['id_paciente'] == f'{paciente}']['tempo'].iloc[0]
-            evento = dados[dados['id_paciente'] == f'{paciente}']['evento'].iloc[0]
+            
+            # Obter tempo e evento
+            paciente_data = dados[dados['id_paciente'] == paciente]
+            if len(paciente_data) == 0:
+                logger.warning(f"Paciente {paciente} sem labels - pulando")
+                continue
+                
+            tempo = paciente_data['tempo'].iloc[0]
+            evento = paciente_data['evento'].iloc[0]
             
             tempos.append(tempo)
             eventos.append(evento)
-
-
-            # Log de processamento
-            #logging.info(f"Processado paciente {paciente}, épocas processadas: 60, tempo: {tempo} dias, evento: {evento}")
-        logger.info(f"Processado paciente {paciente}, épocas processadas: 60, tempo: {tempo} dias, evento: {evento}")
-        print(f"Limite de features: {self.limite_features}, Limite de labels: {self.limite_labels}, Método: {self.metodo}")
-            
+        
+        conn_leitura.close()
+        
+        logger.info(f"Processamento concluído: {len(tempos)} pacientes carregados")
+        logger.info(f"Parâmetros: limite_features={self.limite_features}, "
+                   f"limite_labels={self.limite_labels}, metodo={self.metodo}")
+        
         return atributo_x, atributo_y, atributo_z, tempos, eventos
     
-    
-#==================================Convertendo listas para tensores numpy===========================
-
-
     def convert_to_tensors(self):
+        """
+        Converte dados carregados em tensores PyTorch e cria DataLoaders.
         
-        atributo_x, atributo_y, atributo_z, tempos, eventos = self.carregamento() 
-        # Convertendo listas para arrays numpy
-        atributo_x = np.array(atributo_x)
-        atributo_y = np.array(atributo_y)
-        atributo_z = np.array(atributo_z)
-        #tempos = np.array(tempos)
-        #eventos = np.array(eventos)
+        Returns:
+            Tupla (dl_treino, dl_teste) com DataLoaders
+        """
+        atributo_x, atributo_y, atributo_z, tempos, eventos = self.carregamento()
         
-        # 1. Converter cada array para um tensor PyTorch sem modificações indesejadas
-        tensor_x = torch.tensor(atributo_x, dtype=torch.float32)
-        tensor_y = torch.tensor(atributo_y, dtype=torch.float32)
-        tensor_z = torch.tensor(atributo_z, dtype=torch.float32)
-
-        # OBS: Muitas camadas Conv1D do PyTorch preferem o formato (batch, channels, timesteps).
-        # Para obter (channels, timesteps), você usaria dim=0:
+        # Verificar comprimentos consistentes
+        comprimentos = [len(arr) for arr in atributo_x]
+        if len(set(comprimentos)) > 1:
+            logger.warning(f"Sinais com comprimentos diferentes detectados: {set(comprimentos)}")
+            # Padronizar para o menor comprimento
+            min_len = min(comprimentos)
+            atributo_x = [arr[:min_len] for arr in atributo_x]
+            atributo_y = [arr[:min_len] for arr in atributo_y]
+            atributo_z = [arr[:min_len] for arr in atributo_z]
         
-        # 2. Empilhar os tensores para criar o formato (batch, channels, timesteps)
-        # CORREÇÃO: Usar dim=1 para empilhar os canais corretamente.
-        # O formato de entrada é [N, L], [N, L], [N, L]
-        # O resultado será [N, 3, L], que é (batch, channels, timesteps)
+        # Converter para tensores PyTorch
+        tensor_x = torch.tensor(np.array(atributo_x), dtype=torch.float32)
+        tensor_y = torch.tensor(np.array(atributo_y), dtype=torch.float32)
+        tensor_z = torch.tensor(np.array(atributo_z), dtype=torch.float32)
+        
+        # Formato: (batch, channels, timesteps)
         sinais_tensor = torch.stack([tensor_x, tensor_y, tensor_z], dim=1)
         
+        # Salvar amostra para visualização
+        self.amostra_sinal = sinais_tensor[:1].numpy()
         
-        
-        self.amostra_sinal = sinais_tensor[:1].numpy()  # pega 1 amostra real
-        
-        # convertendo para array 
+        # Arrays numpy para labels
         tempos_array = np.array(tempos)
         eventos_array = np.array(eventos)
         
-        
+        # Split treino/teste
         indices = np.arange(len(sinais_tensor))
         idx_treino, idx_teste = train_test_split(indices, test_size=0.2, random_state=123)
-        sinais_treino, sinais_teste = sinais_tensor[idx_treino], sinais_tensor[idx_teste]
-        tempos_treino, tempos_teste = tempos_array[idx_treino], tempos_array[idx_teste]
-        eventos_treino, eventos_teste = eventos_array[idx_treino], eventos_array[idx_teste]
         
-        self.tempo_testeget = tempos_teste
-        self.evento_testeget = eventos_teste
-        #self.sinal_testeget = sinais_teste
+        sinais_treino = sinais_tensor[idx_treino]
+        sinais_teste = sinais_tensor[idx_teste]
+        tempos_treino = tempos_array[idx_treino]
+        tempos_teste = tempos_array[idx_teste]
+        eventos_treino = eventos_array[idx_treino]
+        eventos_teste = eventos_array[idx_teste]
         
+        # Salvar dados de teste
+        self.tempo_teste = tempos_teste
+        self.evento_teste = eventos_teste
         
-        # 3. TRANSFORMAÇÃO DOS RÓTULOS (permanece igual)
+        # Transformação dos rótulos
         num_durations = 20
-        
         self.labtrans = LogisticHazard.label_transform(num_durations)
         
-        
-        # Agora, use os arrays NumPy
         alvo_treino = self.labtrans.fit_transform(tempos_treino, eventos_treino)
         alvo_teste = self.labtrans.transform(tempos_teste, eventos_teste)
         
-    
+        # Criar datasets e dataloaders
         dataset_treino = ECGDatasetBatch(sinais_treino, *alvo_treino)
         dataset_teste = ECGDatasetBatch(sinais_teste, *alvo_teste)
         
-        # batch_size = 128
         dl_treino = tt.data.DataLoaderBatch(dataset_treino, self.batch_size, shuffle=True)
         dl_teste = tt.data.DataLoaderBatch(dataset_teste, self.batch_size, shuffle=False)
-
-        # return sinais_tensor, tempos, eventos
+        
+        logger.info(f"DataLoaders criados - Treino: {len(dataset_treino)}, Teste: {len(dataset_teste)}")
+        
         return dl_treino, dl_teste
     
-   
-    
-    
+    # Getters
     def get_labtrans(self):
-            return self.labtrans
-        
+        if self.labtrans is None:
+            raise ValueError("labtrans não inicializado. Execute convert_to_tensors() primeiro.")
+        return self.labtrans
+    
     def get_amostra_sinal(self):
+        if self.amostra_sinal is None:
+            raise ValueError("amostra_sinal não inicializado. Execute convert_to_tensors() primeiro.")
         return self.amostra_sinal
     
     def get_evento_tempo(self):
-        return self.tempo_testeget, self.evento_testeget
+        if self.tempo_teste is None or self.evento_teste is None:
+            raise ValueError("Dados de teste não inicializados. Execute convert_to_tensors() primeiro.")
+        return self.tempo_teste, self.evento_teste

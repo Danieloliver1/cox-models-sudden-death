@@ -210,7 +210,7 @@ class PassandoDados:
 
     def preparar_dados(self):
         """
-        Prepara os dados para treinamento.
+        Prepara os dados para treinamento, dividindo em TREINO, VALIDAÇÃO e TESTE.
         Retorna geradores e informações necessárias.
         """
         conn = duckdb.connect(self.linkdb, read_only=True)
@@ -218,26 +218,48 @@ class PassandoDados:
         conn.close()
         
         print(f"📊 Total de pacientes encontrados: {len(lista_pacientes)}")
+
+        # --- LÓGICA DE DIVISÃO (TRAIN / VALIDATION / TEST) ---
+
+        # Para fazer uma divisão estratificada e garantir proporções de eventos,
+        # vamos buscar os labels (evento) para cada paciente na lista.
+        eventos_pacientes = [dados[dados['id_paciente'] == p]['evento'].iloc[0] for p in lista_pacientes]
+
+        # ✅ ETAPA 1: Divisão em Treino+Validação (80%) e Teste (20%)
+        # O conjunto de teste será guardado e usado apenas no final.
+        indices = np.arange(len(lista_pacientes))
         
-        # Split treino/teste (80/20)
-        idx_treino, idx_teste = train_test_split(
-            np.arange(len(lista_pacientes)), 
+        idx_train_val, idx_test = train_test_split(
+            indices,
             test_size=0.2, 
-            random_state=123
+            random_state=123,
+            stratify=eventos_pacientes  # Estratificar para manter a proporção de eventos
         )
+
+        self.pacientes_teste = lista_pacientes[idx_test]
+        pacientes_train_val = lista_pacientes[idx_train_val]
+        eventos_train_val = np.array(eventos_pacientes)[idx_train_val]
         
-        self.pacientes_treino = lista_pacientes[idx_treino]
-        self.pacientes_teste = lista_pacientes[idx_teste]
+        # ✅ ETAPA 2: Divisão do conjunto maior em Treino (80% de 80%) e Validação (20% de 80%)
+        idx_train, idx_val = train_test_split(
+            np.arange(len(pacientes_train_val)),
+            test_size=0.25, # 0.25 de 80% é 20% do total
+            random_state=123,
+            stratify=eventos_train_val # Estratificar novamente
+        )
+
+        self.pacientes_treino = pacientes_train_val[idx_train]
+        self.pacientes_validacao = pacientes_train_val[idx_val]
+
+        print(f"   - Treino:    {len(self.pacientes_treino)} pacientes")
+        print(f"   - Validação: {len(self.pacientes_validacao)} pacientes")
+        print(f"   - Teste:     {len(self.pacientes_teste)} pacientes")
         
-        print(f"   - Treino: {len(self.pacientes_treino)} pacientes")
-        print(f"   - Teste: {len(self.pacientes_teste)} pacientes")
-        
-        # Configurar labtrans (precisa de dados para fit)
+        # Configurar labtrans (usando APENAS dados de treino para fit)
         num_durations = 20
         self.labtrans = LogisticHazard.label_transform(num_durations)
         
-        # Carregar um batch pequeno para configurar labtrans e pegar amostra
-        print("🔄 Configurando labtrans...")
+        print("🔄 Configurando labtrans (usando apenas dados de treino)...")
         gen_temp = self.ecg_generator(self.pacientes_treino, batch_size=min(16, len(self.pacientes_treino)))
         sinais_temp, tempos_temp, eventos_temp = next(gen_temp)
         
@@ -246,22 +268,21 @@ class PassandoDados:
         
         print(f"✅ Labtrans configurado com {self.labtrans.out_features} durações")
         
-        # Calcular steps por época
-        steps_per_epoch_train = max(1, len(self.pacientes_treino) // self.batch_size)
-        steps_per_epoch_test = max(1, len(self.pacientes_teste) // self.batch_size)
+        # Calcular steps por época para cada conjunto
+        steps_per_epoch_train = (len(self.pacientes_treino) + self.batch_size - 1) // self.batch_size
+        steps_per_epoch_val = (len(self.pacientes_validacao) + self.batch_size - 1) // self.batch_size
+        steps_per_epoch_test = (len(self.pacientes_teste) + self.batch_size - 1) // self.batch_size
         
-        # Adicionar step extra se houver resto
-        if len(self.pacientes_treino) % self.batch_size != 0:
-            steps_per_epoch_train += 1
-        if len(self.pacientes_teste) % self.batch_size != 0:
-            steps_per_epoch_test += 1
-        
+        # ✅ ATUALIZAR O DICIONÁRIO DE RETORNO
         return {
             'train_generator': self.ecg_generator(self.pacientes_treino),
+            'val_generator': self.ecg_generator(self.pacientes_validacao),
             'test_generator': self.ecg_generator(self.pacientes_teste),
             'steps_per_epoch_train': steps_per_epoch_train,
+            'steps_per_epoch_val': steps_per_epoch_val,
             'steps_per_epoch_test': steps_per_epoch_test,
             'num_train_samples': len(self.pacientes_treino),
+            'num_val_samples': len(self.pacientes_validacao),
             'num_test_samples': len(self.pacientes_teste)
         }
     
