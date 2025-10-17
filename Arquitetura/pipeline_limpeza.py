@@ -1,8 +1,55 @@
 import numpy as np
 import pandas as pd
 import neurokit2 as nk
+import pywt  # Biblioteca para transformada wavelet
 
 
+# ============================================================
+# FUNÇÃO AUXILIAR: FILTRO WAVELET
+# ============================================================
+def wavelet_filter_preservando_qrs(signal, wavelet='db6', level=4, atenuacao=0.2):
+    """
+    Aplica filtro wavelet preservando as características do complexo QRS.
+    
+    Parâmetros:
+    -----------
+    signal : array
+        Sinal ECG a ser filtrado
+    wavelet : str
+        Tipo de wavelet (padrão: 'db6')
+    level : int
+        Nível de decomposição (padrão: 4)
+    atenuacao : float
+        Fator de atenuação para detalhes de alto nível (padrão: 0.2)
+        
+    Retorna:
+    --------
+    array: Sinal filtrado
+    """
+    coeffs = pywt.wavedec(signal, wavelet, level=level)
+    
+    # Mantém detalhes de nível 1 e 2 (alta frequência = QRS)
+    # Atenua detalhes de nível mais alto (ruído)
+    for i in range(3, len(coeffs)):
+        coeffs[i] *= atenuacao  # mantém apenas uma fração da energia
+    
+    ecg_wavelet_filtered = pywt.waverec(coeffs, wavelet)
+    
+    # Ajusta o tamanho se necessário (waverec pode retornar tamanho ligeiramente diferente)
+    if len(ecg_wavelet_filtered) > len(signal):
+        ecg_wavelet_filtered = ecg_wavelet_filtered[:len(signal)]
+    elif len(ecg_wavelet_filtered) < len(signal):
+        # Padding com zeros se necessário
+        ecg_wavelet_filtered = np.pad(ecg_wavelet_filtered, 
+                                       (0, len(signal) - len(ecg_wavelet_filtered)), 
+                                       mode='constant')
+    
+    return ecg_wavelet_filtered
+
+
+# ============================================================
+# CLASSE PRINCIPAL
+# ============================================================
 class ECGMetricCalculator:
     """
     Calcula métricas de HRV (domínio do tempo) e morfológicas (QRS/QT) 
@@ -10,18 +57,35 @@ class ECGMetricCalculator:
     
     Usa apenas nk.hrv_time() por ser mais robusto que nk.ecg_intervalrelated().
     """
-    def __init__(self, cleaned_signal, sampling_rate=200, debug=False):
+    def __init__(self, cleaned_signal, sampling_rate=200, debug=False, metodo='elgendi2010'):
+        """
+        Inicializa o calculador de métricas ECG.
+        
+        Parâmetros:
+        -----------
+        cleaned_signal : array
+            Sinal ECG já pré-processado
+        sampling_rate : int
+            Taxa de amostragem (padrão: 200 Hz)
+        debug : bool
+            Se True, imprime mensagens de debug
+        metodo : str
+            Método de limpeza do NeuroKit2 ('elgendi2010', 'pantompkins1985', etc.)
+        """
         self.sampling_rate = sampling_rate
         self.debug = debug
+        self.metodo = metodo
         
         if self.debug:
             print(f"📊 Sinal recebido: {len(cleaned_signal)} amostras")
         
-        self.ecg_limpo = nk.ecg_clean(cleaned_signal, sampling_rate=sampling_rate, method='elgendi2010')
+        # Limpeza do sinal com NeuroKit2
+        self.ecg_limpo = nk.ecg_clean(cleaned_signal, sampling_rate=sampling_rate, method=metodo)
         
         if self.debug:
-            print(f"✅ Sinal limpo: {len(self.ecg_limpo)} amostras")
+            print(f"✅ Sinal limpo com método '{metodo}': {len(self.ecg_limpo)} amostras")
         
+        # Cria épocas
         self.epochs = self._create_epochs()
         
         if self.debug:
@@ -175,8 +239,8 @@ class ECGMetricCalculator:
                     'HRV_pNN50': hrv_pnn50,
                     'QRS_Duration_Mean': qrs_duration_mean,
                     'QT_Interval_Mean': qt_interval_mean,
-                    'Heart_Rate': heart_rate,  # Extra: frequência cardíaca média
-                    'Num_RR_Intervals': len(rr_intervals_ms),  # Extra: número de intervalos RR
+                    'Heart_Rate': heart_rate,
+                    'Num_RR_Intervals': len(rr_intervals_ms),
                 }
                 all_metrics.append(metrics_dict)
                 epochs_processadas += 1
@@ -200,8 +264,7 @@ class ECGMetricCalculator:
     
     def get_summary_statistics(self, metrics_df):
         """
-        Calcula estatísticas resumidas (média, std, min, max) das métricas.
-        Útil para comparar com valores clínicos que são baseados em todo o registro.
+        Calcula estatísticas resumidas (média, std, min, max) das métricas por paciente.
         """
         numeric_cols = metrics_df.select_dtypes(include=[np.number]).columns
         numeric_cols = [col for col in numeric_cols if col != 'Epoca']
@@ -220,7 +283,9 @@ class ECGMetricCalculator:
 # FUNÇÃO DE AUTOMAÇÃO PARA MÚLTIPLOS PACIENTES
 # ============================================================
 def processar_multiplos_pacientes(pacientes_lista, canal='x', minutos_a_pular=60, 
-                                   duracao_em_minutos=10, sampling_rate=200, debug=False):
+                                   duracao_em_minutos=10, sampling_rate=200, 
+                                   debug=False, metodo='elgendi2010',
+                                   usar_wavelet=True, wavelet_level=4, wavelet_atenuacao=0.2):
     """
     Processa múltiplos pacientes e retorna um DataFrame consolidado.
     
@@ -238,6 +303,14 @@ def processar_multiplos_pacientes(pacientes_lista, canal='x', minutos_a_pular=60
         Taxa de amostragem
     debug : bool
         Se True, mostra mensagens de debug
+    metodo : str
+        Método de limpeza do NeuroKit2
+    usar_wavelet : bool
+        Se True, aplica filtro wavelet antes da limpeza
+    wavelet_level : int
+        Nível de decomposição wavelet
+    wavelet_atenuacao : float
+        Fator de atenuação para detalhes de alto nível
     
     Retorna:
     --------
@@ -252,6 +325,10 @@ def processar_multiplos_pacientes(pacientes_lista, canal='x', minutos_a_pular=60
     
     print(f"\n{'='*70}")
     print(f"🚀 PROCESSANDO {len(pacientes_lista)} PACIENTES")
+    print(f"   Método de limpeza: {metodo}")
+    print(f"   Filtro Wavelet: {'SIM' if usar_wavelet else 'NÃO'}")
+    if usar_wavelet:
+        print(f"   Wavelet level: {wavelet_level}, atenuação: {wavelet_atenuacao}")
     print(f"{'='*70}\n")
     
     for i, paciente_id in enumerate(pacientes_lista, 1):
@@ -267,21 +344,37 @@ def processar_multiplos_pacientes(pacientes_lista, canal='x', minutos_a_pular=60
                 sampling_rate=sampling_rate
             )
             
+            # Aplica filtro wavelet se solicitado
+            if usar_wavelet:
+                sinal = wavelet_filter_preservando_qrs(
+                    sinal, 
+                    wavelet='db6', 
+                    level=wavelet_level, 
+                    atenuacao=wavelet_atenuacao
+                )
+                if debug:
+                    print(f"   ✓ Filtro wavelet aplicado")
+            
             # Calcula métricas
-            calculator = ECGMetricCalculator(sinal, sampling_rate=sampling_rate, debug=debug)
+            calculator = ECGMetricCalculator(sinal, sampling_rate=sampling_rate, 
+                                            debug=debug, metodo=metodo)
             df_metricas = calculator.calculate_metrics_for_epochs()
             
             if len(df_metricas) == 0:
                 print(f"   ⚠️  Nenhuma época processada para {paciente_id}")
                 continue
             
-            # Adiciona ID do paciente
+            # Adiciona ID do paciente e configurações
             df_metricas['Paciente_ID'] = paciente_id
             all_epochs.append(df_metricas)
             
             # Calcula resumo
             df_resumo = calculator.get_summary_statistics(df_metricas)
             df_resumo['Paciente_ID'] = paciente_id
+            df_resumo['metodo'] = metodo
+            df_resumo['wavelet'] = 'sim' if usar_wavelet else 'nao'
+            df_resumo['wavelet_level'] = wavelet_level if usar_wavelet else None
+            df_resumo['wavelet_atenuacao'] = wavelet_atenuacao if usar_wavelet else None
             all_summaries.append(df_resumo)
             
             print(f"   ✅ {len(df_metricas)} épocas processadas\n")
